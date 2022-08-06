@@ -20,6 +20,8 @@ library(lubridate)
 library(ggplot2)
 library(ggforce)
 library(zoom)
+library(fixest)
+library(vtable)
 ```
 
 # Use list.files(), read_csv and bind_rows() to read and combine as data frame.
@@ -108,7 +110,7 @@ final_df <- df1 %>% inner_join(id_name_link, 'schname') %>% inner_join(Scorecard
 # Trying to see how the data looks like in graph-Explore with month_of_record and mean_index_standardized
 
 ```{r}
-ggplot(final_df, aes(x=month_of_record, y=mean_index_standardized)) + geom_point() + geom_smooth(method = 'lm')
+ggplot(final_df, aes(x=month_of_record, y=mean_index_standardized)) + geom_point() + geom_smooth(method = 'lm') + geom_vline(xintercept = as.Date("2015-09-01"))
 m3 <- feols(mean_index_standardized~month_of_record, data = final_df)
 ```
 
@@ -122,11 +124,11 @@ m3 <- feols(mean_index_standardized~month_of_record, data = final_df)
 
 ```{r}
 high_earning_df <- final_df %>% filter(earnings >= earning_79)
-ggplot(high_earning_df, aes(x=month_of_record, y=mean_index_standardized)) + geom_point() + geom_smooth(method = 'lm') + ggtitle("High-earning schools")
+ggplot(high_earning_df, aes(x=month_of_record, y=mean_index_standardized)) + geom_point() + geom_smooth(method = 'lm') + geom_vline(xintercept = as.Date("2015-09-01"))+ ggtitle("High-earning schools")
 m1 <- feols(mean_index_standardized~month_of_record, data = high_earning_df)
 
 low_earning_df <- final_df %>% filter(earnings <= earning_29)
-ggplot(low_earning_df, aes(x=month_of_record, y=mean_index_standardized)) + geom_point() + geom_smooth(method = 'lm') + ggtitle("Low-earning schools")
+ggplot(low_earning_df, aes(x=month_of_record, y=mean_index_standardized)) + geom_point() + geom_smooth(method = 'lm') + geom_vline(xintercept = as.Date("2015-09-01"))+ ggtitle("Low-earning schools")
 m2 <- feols(mean_index_standardized~month_of_record, data = low_earning_df)
 etable(m1, m2)
 ```
@@ -135,7 +137,7 @@ etable(m1, m2)
 
 ```{r}
 final_df_high_low <- final_df %>% filter(earnings >= earning_79 | earnings <= earning_29)
-ggplot(final_df_high_low, aes(x=month_of_record, y=mean_index_standardized)) + geom_point() + geom_smooth(method = 'lm') + ggtitle("High/Low-earning schools")
+ggplot(final_df_high_low, aes(x=month_of_record, y=mean_index_standardized)) + geom_point() + geom_smooth(method = 'lm') + geom_vline(xintercept = as.Date("2015-09-01"))+ ggtitle("High/Low-earning schools")
 m4 <- feols(mean_index_standardized~month_of_record, data = final_df_high_low)
 etable(m3, m4)
 ```
@@ -146,6 +148,7 @@ etable(m3, m4)
 ggplot(NULL, aes(x=month_of_record, y=mean_index_standardized)) +    
   geom_point(data = high_earning_df, col = "red") +
   geom_point(data = low_earning_df, col = "blue") + 
+  geom_vline(xintercept = as.Date("2015-09-01"))+ 
   ggtitle("Combined High/Low-earning Plot")
 ```
 

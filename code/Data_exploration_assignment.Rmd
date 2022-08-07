@@ -29,9 +29,6 @@ library(vtable)
 ```{r}
 list_filenames <- list.files(path="../data/", pattern="trends_up_to_", all.files=FALSE, full.names=TRUE)
 df_list <- map(list_filenames, read_csv)
-#for(i in 1:length(list_filenames)){
-# read_csv(paste0("./data/", list_filenames[i]))
-#}
 df <- bind_rows(df_list)
 ```
 
@@ -43,74 +40,99 @@ id_name_link <- read_csv('../data/id_name_link.csv')
 Scorecard <- read_csv('../data/Most+Recent+Cohorts+(Scorecard+Elements).csv')
 ```
 
-# Aggregate the Google Trends data
+# As you can see below, we are just getting estimate scale from all 3 data sources. 
+# Google trend dataset contains 1.5M records while scoredcard daatset contains ~7.8k records while id_name_link dataset contains ~3.6k records. This tell us that after inner joins + filtering certain conditions + aggregating google trends, our final dataframe would have less than ~3.6k unique college records.  
 
-# Get the first ten characters from monthorweek, get the month from monthorweek and turn both results into date
+```{r}
+nrow(df)
+nrow(id_name_link)
+nrow(Scorecard)
+```
+
+# Here, as a first step after data import, we will aggregate the Google Trends data. 
+# Approach : Get the first ten characters from monthorweek, get the month from monthorweek and turn both results into date
 
 ```{r}
 df <- df %>% mutate(date = str_sub(monthorweek, 1, 10)) %>% mutate(date_usable = ymd(date)) %>% select(-date) %>% mutate(month_of_record = floor_date(date_usable, 'month'))
 ```
 
-# Address variable-index by standardize it and then group_by, summarize it
-
-# Dataframe now is at schname and month level
+# As the google trends data index is not an absolute index or using same calibration process across different google keywords/college names it maps to, we will need to normalize the data to have them at standardize scale. 
+# To standardize index, we subtract mean and divide by standard deviation. 
+# We also group by records to schoolname and month of the record so (schoolname,month) level summarization. 
 
 ```{r}
-df1 <- df %>% group_by(schname,keyword) %>% mutate(index_standardized = (index - mean(index))/sd(index)) %>% na.omit() %>% group_by(schname, month_of_record) %>% summarize(mean_index_standardized = mean(index_standardized))
+normalized_df <- df %>% drop_na(index) %>% group_by(schname,keyword) %>% mutate(index_standardized = (index - mean(index))/sd(index)) %>% group_by(schname, month_of_record) %>% summarize(mean_index_standardized = mean(index_standardized))
 ```
 
-# Filter out all the schools that predominantly grant bachelor's degree
+# PREDDEG column shows predominant degrees awarded by colleges so we filter only the schools that predominantly grant bachelor's degree. 
 
 ```{r}
 Scorecard <- Scorecard %>% filter(PREDDEG == 3)
 ```
 
-# For the calculate purpose, replace PrivacySuppressed and Null in md_earn_wne_p10-REPORTED-EARNINGS column into 0.
+# To analyze earnings reported for alumni of these different colleges, we use "md_earn_wne_p10-REPORTED-EARNINGS" column from Scorecard dataset as that displays median earning reported after 10 years of enrollement for a particular college. 
+# In Scorecard data, there are some colleges for which earnings column is either "PrivacySuppressed" or "NULL". As imported dataset column was "md_earn_wne_p10-REPORTED-EARNINGS" classified as char, we see "NULL" string instead of NA. 
+# For both string terms "PrivacySuppressed" or "NULL", we can impute them with 0/mean value or we can just drop them as data isn't available. 
+# I tried with 0 and mean value imputation but eventually, I decided to drop them as that was the best result for my executions. 
 
 ```{r}
-Scorecard$'md_earn_wne_p10-REPORTED-EARNINGS'[Scorecard$'md_earn_wne_p10-REPORTED-EARNINGS' == "PrivacySuppressed"] <- 0
-Scorecard$'md_earn_wne_p10-REPORTED-EARNINGS'[Scorecard$'md_earn_wne_p10-REPORTED-EARNINGS' == "NULL"] <- 0
+sum(Scorecard$'md_earn_wne_p10-REPORTED-EARNINGS' == "PrivacySuppressed")
+sum(Scorecard$'md_earn_wne_p10-REPORTED-EARNINGS' == "NULL") 
+sum(is.na(Scorecard$'md_earn_wne_p10-REPORTED-EARNINGS'))
+nrow(Scorecard)
+Scorecard<-Scorecard[!(Scorecard$'md_earn_wne_p10-REPORTED-EARNINGS' == "NULL" | Scorecard$'md_earn_wne_p10-REPORTED-EARNINGS' == "PrivacySuppressed" ),]
+nrow(Scorecard)
 ```
 
-# Create a new column by transforming the data type of md_earn_wne_p10-REPORTED-EARNINGS variable
+```{r}
+##Scorecard$'md_earn_wne_p10-REPORTED-EARNINGS'[Scorecard$'md_earn_wne_p10-REPORTED-EARNINGS' == "PrivacySuppressed"] <- 0
+##Scorecard$'md_earn_wne_p10-REPORTED-EARNINGS'[Scorecard$'md_earn_wne_p10-REPORTED-EARNINGS' == "NULL"] <- 0
+```
+
+# As I mentioned above, the default import classification of "md_earn_wne_p10-REPORTED-EARNINGS" is char, I created a new column by typecasting it to numeric data type. 
 
 ```{r}
 Scorecard<-transform(Scorecard, earnings = as.numeric(Scorecard$'md_earn_wne_p10-REPORTED-EARNINGS'))
 ```
 
-# Calculate the Max, Min, Mean, 10th percentile, 25th percentile, 50th percentile, 90th percentile of the median earning of student working and not enrolled 10 years after entry.
+## In order to define high-earning and low-earning colleges, we calculate the Max, Min, Mean, 10th percentile, 25th percentile, 29th percentile 50th percentile, 79th percentile 90th percentile of the median earning of student working and not enrolled 10 years after entry.
 
-# In order to define high-earning and low-earning colleges.
+## I also tried to defines some absolute values (low earning : below 25k and high earning : above 75k) to define thresholds, but evetually, quntile 29 and quantile 79 worked best. 
+
 
 ```{r}
 max_earning <- max(Scorecard$earnings) 
 min_earning <- min(Scorecard$earnings)
 mean_earning <- mean(Scorecard$earnings)
-quantile(Scorecard$earnings, probs = c(0.1, 0.25, 0.75, 0.9, 1))
+quantile(Scorecard$earnings, probs = c(0.1, 0.25, 0.29, 0.75, 0.79, 0.9, 1))
 earning_29 <- quantile(Scorecard$earnings, probs = c(0.29))
 earning_79 <-quantile(Scorecard$earnings, probs = c(0.79))
 ```
 
-# Merge in the Scorecard data.
-
-# Drop those schools sharing the same name.
+# Drop those schools from id_name link data which are sharing the same name.
 
 ```{r}
+length(unique(id_name_link$schname))
 id_name_link <- id_name_link %>% group_by(schname) %>% mutate(n = n()) %>% filter(n==1) %>% select(-n)
+nrow(id_name_link)
+
 ```
 
-# Join data frame together
+# Join google trends data to id_name_link by school name and then id_name_link table to Scorecard data by unitid. # Also, filter only rows where earnings are less than 29th percentile or greater than 79th percentile. 
 
 ```{r}
-final_df <- df1 %>% inner_join(id_name_link, 'schname') %>% inner_join(Scorecard, by = c("unitid" = "UNITID")) %>% select(-c(OPEID, opeid6, INSTNM)) %>% filter(earnings >= earning_79 | earnings <= earning_29) %>% 
+final_df <- normalized_df %>% inner_join(id_name_link, 'schname') %>% inner_join(Scorecard, by = c("unitid" = "UNITID")) %>% select(-c(OPEID, opeid6, INSTNM)) %>% filter(earnings >= earning_79 | earnings <= earning_29) %>% 
   mutate(earning_category = case_when(earnings >= earning_79 ~ '1', earnings <= earning_29 ~ '0')) %>%
   mutate(scorecard_implemented = case_when(month_of_record >= '2015-09-01' ~ '1', TRUE ~ '0'))
+final_df <- final_df%>%mutate(part_of_the_year = case_when(month(month_of_record) <= 7 ~ '0', month(month_of_record) >7 ~ '1'))
+final_df <- final_df%>%mutate(year_of_record = year(month_of_record))
+final_df$year_info <- paste(final_df$part_of_the_year,"-",final_df$year_of_record)
 ```
 
 # Trying to see how the data looks like in graph-Explore with month_of_record and mean_index_standardized
 
 ```{r}
-ggplot(final_df, aes(x=month_of_record, y=mean_index_standardized)) + geom_point() + geom_smooth(method = 'lm') + geom_vline(xintercept = as.Date("2015-09-01"))
+ggplot(final_df, aes(x=month_of_record, y=mean_index_standardized,col=scorecard_implemented)) + geom_point() + geom_smooth(method = 'lm') + geom_vline(xintercept = as.Date("2015-09-01"))
 m3 <- feols(mean_index_standardized~month_of_record, data = final_df)
 ```
 
@@ -118,18 +140,29 @@ m3 <- feols(mean_index_standardized~month_of_record, data = final_df)
 
 # In this assignment I consider high-earning as 79th percentile of earning and low-earning as 29th percentile of earning.
 
+```{r}
+high_earning_df <- final_df %>% filter(earnings >= earning_79)
+low_earning_df <- final_df %>% filter(earnings <= earning_29)
+
+length(unique(high_earning_df$schname))
+length(unique(low_earning_df$schname))
+
+```
+
 # Run regression model and plot the month_of_record and mean of the standardized index to see the relationship
 
-# From the regression result and graph for both high-earning dataframe and low-earning dataframe we can see there is negative relationship between the month and search interest
+# From the regression result and graph for both high-earning dataframe and low-earning dataframe we can see there is negative relationship between the month and search interest. 
+
+# As you can see in graph below, search trend can also be seen as a function of time. Regardless of scorecards implemented, every Jan-July month, search trend overall decreases for all high earning and all learning colleges on average and the jumps back in Aug and decreases again till December. This might be the correlation between when people apply for colleges or when term starts, students will check more information boosting search trend. 
 
 ```{r}
 high_earning_df <- final_df %>% filter(earnings >= earning_79)
-ggplot(high_earning_df, aes(x=month_of_record, y=mean_index_standardized)) + geom_point() + geom_smooth(method = 'lm') + geom_vline(xintercept = as.Date("2015-09-01"))+ ggtitle("High-earning schools")
-m1 <- feols(mean_index_standardized~month_of_record, data = high_earning_df)
+ggplot(high_earning_df, aes(x=month_of_record, y=mean_index_standardized, col=year_info)) + geom_smooth(method = 'lm',se=FALSE) + geom_vline(xintercept = as.Date("2015-09-01"))+ ggtitle("High-earning schools") + geom_point(aes(color = schname)) + theme(legend.position="none") 
+m1 <- feols(mean_index_standardized~month_of_record, data = high_earning_df) 
 
 low_earning_df <- final_df %>% filter(earnings <= earning_29)
-ggplot(low_earning_df, aes(x=month_of_record, y=mean_index_standardized)) + geom_point() + geom_smooth(method = 'lm') + geom_vline(xintercept = as.Date("2015-09-01"))+ ggtitle("Low-earning schools")
-m2 <- feols(mean_index_standardized~month_of_record, data = low_earning_df)
+ggplot(low_earning_df, aes(x=month_of_record, y=mean_index_standardized, col=year_info)) + geom_smooth(method = 'lm') + geom_vline(xintercept = as.Date("2015-09-01"))+ ggtitle("Low-earning schools") + geom_point(aes(color = schname)) + theme(legend.position="none")
+m2 <- feols(mean_index_standardized~month_of_record, data = low_earning_df) 
 etable(m1, m2)
 ```
 
@@ -137,7 +170,7 @@ etable(m1, m2)
 
 ```{r}
 final_df_high_low <- final_df %>% filter(earnings >= earning_79 | earnings <= earning_29)
-ggplot(final_df_high_low, aes(x=month_of_record, y=mean_index_standardized)) + geom_point() + geom_smooth(method = 'lm') + geom_vline(xintercept = as.Date("2015-09-01"))+ ggtitle("High/Low-earning schools")
+ggplot(final_df_high_low, aes(x=month_of_record, y=mean_index_standardized, col=scorecard_implemented)) + geom_point(aes(color = schname)) + theme(legend.position="none")  + geom_smooth(method = 'lm') + geom_vline(xintercept = as.Date("2015-09-01"))+ ggtitle("High/Low-earning schools")
 m4 <- feols(mean_index_standardized~month_of_record, data = final_df_high_low)
 etable(m3, m4)
 ```
@@ -155,9 +188,9 @@ ggplot(NULL, aes(x=month_of_record, y=mean_index_standardized)) +
 #To check total school numbers in each dataframe
 
 ```{r}
-number_of_schoold_final_df <- length(unique(final_df$schname))
-number_of_schoold_high_earning_df <- length(unique(high_earning_df$schname))
-number_of_schoold_low_earning_df <- length(unique(low_earning_df$schname))
+length(unique(final_df$schname))
+length(unique(high_earning_df$schname))
+length(unique(low_earning_df$schname))
 ```
 
 #To look at the variable in final_df
